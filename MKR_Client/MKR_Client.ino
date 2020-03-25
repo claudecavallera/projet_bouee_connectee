@@ -1,4 +1,3 @@
-
 /*
    Copyright (c) 2020 by Antoine Cavallera <antoine.cavallera@gmail.com>
    Copyright (c) 2020 by Claude Cavallera <claude.cavallera@gmail.com>
