@@ -26,13 +26,15 @@
 #include <Console.h>
 #include <SPI.h>
 #include <RH_RF95.h>
-
+#include <Process.h>
 // Singleton instance of the radio driver
 RH_RF95 rf95;
 
 int led = A2;
 float frequency = 433.0;
-
+void uploadData(); // Upload Data to ThingSpeak.
+String dataString = "";
+String myWriteAPIString = "37P1XWK8VAF508NY";
 void setup() 
 {
   pinMode(led, OUTPUT);     
@@ -72,16 +74,55 @@ void loop()
     {
       digitalWrite(led, HIGH);
       RH_RF95::printBuffer("request: ", buf, len);
+      Console.print("Get LoRa Packet: ");
+            for (int i = 0; i < len; i++)
+            {
+                Console.print(buf[i],HEX);
+                Console.print(" ");
+            }
+            Console.println();
+            
       Console.print("got request: ");
       Console.println((char*)buf);
+      Console.print((char*)buf);
       Console.print("RSSI: ");
       Console.println(rf95.lastRssi(), DEC);
+
+       int newData[6] = {0, 0, 0, 0, 0,0}; //Store Sensor Data here
+                    for (int i = 0; i < 6; i++)
+                    {
+                        newData[i] = buf[i];
+                    }
+                    char td = newData[0];
+                    char tu = newData[1];
+                    char pt = newData[2];
+                    char diz = newData[3];
+                    char cent = newData[4];
+                    char mill = newData[5];
+                    Console.print("Get Temperature:");
+                    Console.print(td);
+                    Console.print (tu);
+                    Console.println(pt);
+                    Console.print(diz);
+                    Console.print(cent);
+                    Console.print(mill);
+                    
+                                       
+                    dataString ="field1=";
+                    dataString += td;
+                    dataString += tu;
+                    dataString += pt;
+                    dataString += diz;
+                    dataString += cent ;
+                    dataString += mill;
+                    
+                                       
+                    uploadData(); // 
+                    dataString="";
+
+          
       
-      // Send a reply
-      uint8_t data[] = "And hello back to you";
-      rf95.send(data, sizeof(data));
-      rf95.waitPacketSent();
-      Console.println("Sent a reply");
+     
       digitalWrite(led, LOW);
     }
     else
@@ -89,4 +130,34 @@ void loop()
       Console.println("recv failed");
     }
   }
+}
+void uploadData() {//Upload Data to ThingSpeak
+  // form the string for the API header parameter:
+
+
+  // form the string for the URL parameter, be careful about the required "
+  String upload_url = "https://api.thingspeak.com/update?api_key=";
+  upload_url += myWriteAPIString;
+  upload_url += "&";
+  upload_url += dataString;
+
+  Console.println("Call Linux Command to Send Data");
+  Process p;    // Create a process and call it "p", this process will execute a Linux curl command
+  p.begin("curl");
+  p.addParameter("-k");
+  p.addParameter(upload_url);
+  p.run();    // Run the process and wait for its termination
+
+  Console.print("Feedback from Linux: ");
+  // If there's output from Linux,
+  // send it out the Console:
+  while (p.available()>0) 
+  {
+    char c = p.read();
+    Console.write(c);
+  }
+  Console.println("");
+  Console.println("Call Finished");
+  Console.println("####################################");
+  Console.println("");
 }

@@ -30,17 +30,20 @@
 #endif
 /* Global data */
 enum {state_Read, state_Send, state_Compute, state_Idle} state = state_Read;
+enum {state_R_Temp, state_R_Baro, state_R_Occup} state_R = state_R_Temp;
 const int counterMax = 10;
 float data_temp = 0;
+int analogOccupPin = A0; // potentiometer wiper (middle terminal) connected to analog pin 3               
+int analogOccupValue = 0;  // variable to store the value read
 // Connect one wire to bus 2
 OneWire oneWire(ONE_WIRE_BUS);
-// Pass our oneWire reference to Dallas Temperature. 
+// Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
 void setup() {
   /********** General Setup **********/
   Serial.begin(9600);
-  while (!Serial);
+  //while (!Serial);
 
 
   /********** Setup LoraWan **********/
@@ -49,7 +52,7 @@ void setup() {
     DEBUG_PRINT("Starting LoRa failed!");
     while (1);
   }
-  LoRa.setTxPower(20, PA_OUTPUT_PA_BOOST_PIN);
+  LoRa.setTxPower(17, PA_OUTPUT_PA_BOOST_PIN);
   LoRa.setSpreadingFactor(7);
   LoRa.setSignalBandwidth(125000);
   LoRa.setCodingRate4(6);
@@ -74,19 +77,48 @@ void loop() {
     switch (state)
     {
       case state_Read:
-        start = millis(); 
+        start = millis();
         DEBUG_PRINT("State Read");
         // Read information on sensor
-        SensorRead();
-        // Transition
-        counter_Read++;
-        if ( counter_Read >= counterMax) {
-          counter_Read = 0;
-          state = state_Send;
+        switch (state_R)
+        {
+          case state_R_Temp:
+            DEBUG_PRINT("State_R_Temp");
+            TempSensorRead();
+            state_R = state_R_Baro;
+            break;
+            
+          case state_R_Baro:
+            DEBUG_PRINT("State_R_Baro");
+            BaroSensorRead();
+            state_R = state_R_Occup;
+            break;
+            
+          case state_R_Occup:
+            DEBUG_PRINT("State_R_Occup");
+            AnalogSensorRead();
+            state_R = state_R_Temp;
+            break;
+            
+          default:
+            break;
         }
-        else {
-          state = state_Idle;
-          
+        // Transition a replacer
+        counter_Read++;
+        if (state_R == state_R_Temp)
+        {
+          if (counter_Read >= counterMax)
+          {
+            counter_Read = 0;
+            state = state_Send;
+          }
+          else
+          {
+            state = state_Idle;
+          }
+        }
+        else
+        {
         }
         break;
 
@@ -145,11 +177,11 @@ void LoRaSend() {
 
 }
 
-void SensorRead() {
+void TempSensorRead() {
   char data_receive[] = {};
   DEBUG_PRINT("Sensor Read");
   DEBUG_PRINT("Before blocking requestForConversion");
-  unsigned long start = millis();    
+  unsigned long start = millis();
 
   sensors.requestTemperatures();
 
@@ -157,13 +189,20 @@ void SensorRead() {
   DEBUG_PRINT("After blocking requestForConversion");
   DEBUG_PRINT("Time used: ");
   DEBUG_PRINT(stop - start);
-  
+
   // get temperature
   DEBUG_PRINT("Temperature: ");
-  DEBUG_PRINT(sensors.getTempCByIndex(0));  
+  DEBUG_PRINT(sensors.getTempCByIndex(0));
   DEBUG_PRINT("\n");
   data_temp = sensors.getTempCByIndex(0);
-  // add data temp moyenne pondérée 
+  // add data temp moyenne pondérée
+}
+
+void BaroSensorRead() {
+}
+void AnalogSensorRead() {
+  analogOccupValue = analogRead(analogOccupPin);
+  Serial.println(analogOccupValue);
 }
 
 void onTxDone() {
