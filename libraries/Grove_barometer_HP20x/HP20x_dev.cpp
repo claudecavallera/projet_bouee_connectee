@@ -29,7 +29,7 @@ HP20x_dev HP20x=HP20x_dev(&sercom0,11,12);
  **@ OutPut: none
  **@ Retval: none
 */
-HP20x_dev::HP20x_dev(SERCOM *s, uint8_t pinSDA, uint8_t pinSCL):TwoWire(s,pinSDA,pinSCL)
+HP20x_dev::HP20x_dev(SERCOM *s, uint8_t pinSDA, uint8_t pinSCL):TwoWire(*s,pinSDA,pinSCL)
 {
 	OSR_CFG = HP20X_CONVERT_OSR1024;
     OSR_ConvertTime = 25; 
