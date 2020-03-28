@@ -7,8 +7,8 @@
 */
 
 #include <HP20x_dev.h>
-#include "Arduino.h"
-#include "Wire.h" 
+//#include "Arduino.h"
+//#include "Wire.h" 
 #include <KalmanFilter.h>
 unsigned char ret = 0;
 
