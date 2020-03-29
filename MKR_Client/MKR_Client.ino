@@ -15,6 +15,8 @@
 #include <LoRa.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <HP20x_dev.h>
+#include <KalmanFilter.h>
 
 /* defines */
 #define DEBUG
@@ -34,7 +36,13 @@ enum {state_R_Temp, state_R_Baro, state_R_Occup} state_R = state_R_Temp;
 const int counterMax = 10;
 float data_temp = 0;
 int analogOccupPin = A0; // potentiometer wiper (middle terminal) connected to analog pin 3               
-int analogOccupValue = 0;  // variable to store the value read
+unsigned char ret = 0;
+enum {data_Temp_Water, data_Temp_Air, data_Pres_Air, data_Occup};
+float data_buffer[4] = {0};
+/* Instance */
+KalmanFilter t_filter;    //temperature filter
+KalmanFilter p_filter;    //pressure filter
+KalmanFilter a_filter;    //altitude filter
 // Connect one wire to bus 2
 OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
@@ -64,6 +72,18 @@ void setup() {
   /********** Setup Sensor **********/
   // Start up the library
   sensors.begin();
+  HP20x.begin();
+  delay(100);
+  /* Determine HP20x_dev is available or not */
+  ret = HP20x.isAvailable();
+  if(OK_HP20X_DEV == ret)
+  {
+    Serial.println("HP20x_dev is available.\n");    
+  }
+  else
+  {
+    Serial.println("HP20x_dev isn't available.\n");
+  }
 
 }
 
@@ -170,7 +190,10 @@ void LoRaSend() {
   LoRa.print(header[1]);
   LoRa.print(header[2]);
   LoRa.print(header[3]);
-  LoRa.print(data_temp);
+  LoRa.print(data_buffer[data_Temp_Water]);
+  LoRa.print(data_buffer[data_Temp_Air]);
+  LoRa.print(data_buffer[data_Pres_Air]);
+  LoRa.print(data_buffer[data_Occup]);
   LoRa.print(counter);
   LoRa.endPacket(true); // true = async / non-blocking mode
   counter++;
@@ -194,15 +217,46 @@ void TempSensorRead() {
   DEBUG_PRINT("Temperature: ");
   DEBUG_PRINT(sensors.getTempCByIndex(0));
   DEBUG_PRINT("\n");
-  data_temp = sensors.getTempCByIndex(0);
+  data_buffer[data_Temp_Water] = sensors.getTempCByIndex(0);
   // add data temp moyenne pondérée
 }
 
 void BaroSensorRead() {
+    char display[40];
+    if(OK_HP20X_DEV == ret)
+    { 
+    Serial.println("------------------\n");
+    long Temper = HP20x.ReadTemperature();
+    float t = Temper/100.0;    
+    Serial.println("C.\n");
+    Serial.println("Filter:");
+    Serial.print(t_filter.Filter(t));
+    Serial.println("C.\n");
+    data_buffer[data_Temp_Air] = t_filter.Filter(t);
+ 
+    long Pressure = HP20x.ReadPressure();
+    t = Pressure/100.0;
+    Serial.println("hPa.\n");
+    Serial.println("Filter:");
+    Serial.print(p_filter.Filter(t));
+    Serial.println("hPa\n");
+    data_buffer[data_Pres_Air] = p_filter.Filter(t);
+    
+    long Altitude = HP20x.ReadAltitude();
+    t = Altitude/100.0;
+    Serial.print(t);
+    Serial.println("m.\n");
+    Serial.println("Filter:");
+    Serial.print(a_filter.Filter(t));
+    Serial.println("m.\n");
+    Serial.println("------------------\n");
+    }
 }
 void AnalogSensorRead() {
-  analogOccupValue = analogRead(analogOccupPin);
+  float analogOccupValue = 0;  // variable to store the value read
+  analogOccupValue = (float)analogRead(analogOccupPin);
   Serial.println(analogOccupValue);
+  data_buffer[data_Occup] = analogOccupValue;
 }
 
 void onTxDone() {
