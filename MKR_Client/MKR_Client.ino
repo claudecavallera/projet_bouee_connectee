@@ -9,6 +9,9 @@
    published by the Free Software Foundation.
 */
 
+/*--------------------------------------------*/
+/*                 INCLUDES                   */
+/*--------------------------------------------*/
 #include "Arduino.h"
 #include <SPI.h>
 #include <ArduinoLowPower.h>
@@ -18,40 +21,88 @@
 #include <HP20x_dev.h>
 #include <KalmanFilter.h>
 
-/* defines */
+/*--------------------------------------------*/
+/*                 DEFINES                    */
+/*--------------------------------------------*/
 #define DEBUG
-#define LORA_FREQUENCY 433E6
-#define TRUE 1
-#define FALSE 0
-#define ONE_WIRE_BUS 2
-/* preprocessor define for debug purpose */
-#ifdef DEBUG
+#define LORA_FREQUENCY        433E6
+#define LORA_TX_POWER         17
+#define LORA_SPREADING_FACTOR 7
+#define LORA_SIGNAL_BANDWIDTH 125000
+#define LORA_CODING_RATE      6
+#define LORA_SYNC_WORD        0x12
+
+#define ONE_WIRE_BUS          2
+#define READ_DELAY            500
+#define SEND_DELAY            5000
+#define RATE_SEND_READ_DELAY  SEND_DELAY/READ_DELAY
+
+#define HEADER_SIZE           4
+#define HEADER_INDEX_TO       0
+#define HEADER_INDEX_FROM     1
+#define HEADER_INDEX_ID       2
+#define HEADER_INDEX_FLAG     3
+
+#define DATA_SIZE             4
+#define DATA_INDEX_TEMP_WATER 0
+#define DATA_INDEX_TEMP_AIR   1
+#define DATA_INDEX_PRES_AIR   2
+#define DATA_INDEX_OCCUP      3
+
+#define PAYLOAD_BUFFER_SIZE   128
+#define CHAR_SEPARATOR        0x23
+
+#ifdef  DEBUG
 #define DEBUG_PRINT(x)  Serial.println (x)
 #else
 #define DEBUG_PRINT(x)
 #endif
-/* Global data */
-enum {state_Read, state_Send, state_Compute, state_Idle} state = state_Read;
-enum {state_R_Temp, state_R_Baro, state_R_Occup} state_R = state_R_Temp;
-const int counterMax = 10;
-float data_temp = 0;
-int analogOccupPin = A0; // potentiometer wiper (middle terminal) connected to analog pin 3               
+/*--------------------------------------------*/
+/*                 GLOBAL DATA                */
+/*--------------------------------------------*/
+enum {state_Read, state_Send, state_Compute, state_Idle}
+state = state_Read;
+enum {state_R_Temp, state_R_Baro, state_R_Occup}
+state_R = state_R_Temp;
+const int counterMax = RATE_SEND_READ_DELAY;
+int analogOccupPin = A0; // potentiometer wiper (middle terminal) connected to analog pin 3
 unsigned char ret = 0;
-enum {data_Temp_Water, data_Temp_Air, data_Pres_Air, data_Occup};
-float data_buffer[4] = {0};
-/* Instance */
+
+char header_to = 0xff;
+char header_from = 0x01;
+char header_id = 00;
+char header_flags = 00;
+
+struct loRaFrame {
+  char  header_buffer[HEADER_SIZE];
+  float data_buffer[DATA_SIZE];
+  char  separator;
+};
+
+//char  payload_buffer[PAYLOAD_BUFFER_SIZE] = {0};
+
+/*--------------------------------------------*/
+/*                 INSTANCES                  */
+/*--------------------------------------------*/
+/* OneWire */
+OneWire oneWire(ONE_WIRE_BUS);
+/* DallasTemperature */
+DallasTemperature sensors(&oneWire);
+/* Kalman Filter */
 KalmanFilter t_filter;    //temperature filter
 KalmanFilter p_filter;    //pressure filter
 KalmanFilter a_filter;    //altitude filter
-// Connect one wire to bus 2
-OneWire oneWire(ONE_WIRE_BUS);
-// Pass our oneWire reference to Dallas Temperature.
-DallasTemperature sensors(&oneWire);
+/* loRa Frame */
+struct loRaFrame LoraFrame1 = {{0}, {0}, CHAR_SEPARATOR};
 
+/*--------------------------------------------*/
+/*              SETUP FUNCTION                */
+/*--------------------------------------------*/
 void setup() {
   /********** General Setup **********/
   Serial.begin(9600);
   //while (!Serial);
+  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, onWakeUp, CHANGE);
 
 
   /********** Setup LoraWan **********/
@@ -60,13 +111,17 @@ void setup() {
     DEBUG_PRINT("Starting LoRa failed!");
     while (1);
   }
-  LoRa.setTxPower(17, PA_OUTPUT_PA_BOOST_PIN);
-  LoRa.setSpreadingFactor(7);
-  LoRa.setSignalBandwidth(125000);
-  LoRa.setCodingRate4(6);
-  LoRa.setSyncWord(0x12);
+  LoRa.setTxPower         (LORA_TX_POWER, PA_OUTPUT_PA_BOOST_PIN);
+  LoRa.setSpreadingFactor (LORA_SPREADING_FACTOR);
+  LoRa.setSignalBandwidth (LORA_SIGNAL_BANDWIDTH);
+  LoRa.setCodingRate4     (LORA_CODING_RATE);
+  LoRa.setSyncWord        (LORA_SYNC_WORD);
   // Attach interrupt to callback function
   LoRa.onTxDone(onTxDone);
+  LoraFrame1.header_buffer[HEADER_INDEX_TO]   = header_to;
+  LoraFrame1.header_buffer[HEADER_INDEX_FROM] = header_from;
+  LoraFrame1.header_buffer[HEADER_INDEX_ID]   = header_id;
+  LoraFrame1.header_buffer[HEADER_INDEX_FLAG] = header_flags;
 
 
   /********** Setup Sensor **********/
@@ -76,9 +131,9 @@ void setup() {
   delay(100);
   /* Determine HP20x_dev is available or not */
   ret = HP20x.isAvailable();
-  if(OK_HP20X_DEV == ret)
+  if (OK_HP20X_DEV == ret)
   {
-    Serial.println("HP20x_dev is available.\n");    
+    Serial.println("HP20x_dev is available.\n");
   }
   else
   {
@@ -87,6 +142,10 @@ void setup() {
 
 }
 
+
+/*--------------------------------------------*/
+/*              MAIN FUNCTION                 */
+/*--------------------------------------------*/
 void loop() {
   int counter_Read = 0;
   unsigned long start;
@@ -107,38 +166,29 @@ void loop() {
             TempSensorRead();
             state_R = state_R_Baro;
             break;
-            
+
           case state_R_Baro:
             DEBUG_PRINT("State_R_Baro");
             BaroSensorRead();
             state_R = state_R_Occup;
             break;
-            
+
           case state_R_Occup:
             DEBUG_PRINT("State_R_Occup");
             AnalogSensorRead();
             state_R = state_R_Temp;
+            if (counter_Read >= counterMax) {
+              counter_Read = 0;
+              state = state_Send;
+            }
+            else {
+              counter_Read++;
+              state = state_Idle;
+            }
             break;
-            
+
           default:
             break;
-        }
-        // Transition a replacer
-        counter_Read++;
-        if (state_R == state_R_Temp)
-        {
-          if (counter_Read >= counterMax)
-          {
-            counter_Read = 0;
-            state = state_Send;
-          }
-          else
-          {
-            state = state_Idle;
-          }
-        }
-        else
-        {
         }
         break;
 
@@ -146,8 +196,6 @@ void loop() {
         DEBUG_PRINT("State Send");
         // Send Read data with Lora
         LoRaSend();
-
-        //Transistion
         state = state_Compute;
         break;
 
@@ -157,14 +205,13 @@ void loop() {
 
       case state_Idle:
         DEBUG_PRINT("State Idle");
-        //LowPower.idle();
-        //LowPower.sleep(500);
-        delay(500);
-        // Transition
-        state = state_Read;
         stop = millis();
+        DEBUG_PRINT("------------------\n");
         DEBUG_PRINT("Time used for 1 cycle: ");
         DEBUG_PRINT(stop - start);
+        
+        LowPower.sleep(READ_DELAY);
+        //state = state_Read;
         break;
 
       default:
@@ -173,96 +220,134 @@ void loop() {
   }
 }
 
+/*--------------------------------------------*/
+/*              LoRaSend FUNCTION             */
+/*--------------------------------------------*/
 void LoRaSend() {
   int counter = 0;
-  char header_to = 0xff;
-  char header_from = 0x01;
-  char header_id = 00;
-  char header_flags = 00;
-  char header[] = {header_to, header_from, header_id, header_flags};
-
   DEBUG_PRINT("Sending packet non-blocking: ");
   DEBUG_PRINT(counter);
+  // reset buffer
 
-  // send in async / non-blocking mode
+  /*send in async / non-blocking mode*/
   LoRa.beginPacket();
-  LoRa.print(header[0]);
-  LoRa.print(header[1]);
-  LoRa.print(header[2]);
-  LoRa.print(header[3]);
-  LoRa.print(data_buffer[data_Temp_Water]);
-  LoRa.print(data_buffer[data_Temp_Air]);
-  LoRa.print(data_buffer[data_Pres_Air]);
-  LoRa.print(data_buffer[data_Occup]);
+  /* solution 1
+    memset(payload_buffer, 0, PAYLOAD_BUFFER_SIZE);
+    strncpy(payload_buffer, header, HEADER_SIZE);
+    dtostrf(data_buffer, 4, 3, payload_buffer);
+  */
+  /*solution 2*/
+  /* header */
+  for (int i = 0; i < HEADER_SIZE; i++)
+  {
+    LoRa.print(LoraFrame1.header_buffer[i]);
+  }
+  /* payload*/
+  for (int i = 0; i < DATA_SIZE; i++)
+  {
+    LoRa.print(LoraFrame1.data_buffer[i]);
+    LoRa.print(LoraFrame1.separator);
+  }
   LoRa.print(counter);
   LoRa.endPacket(true); // true = async / non-blocking mode
-  counter++;
 
+  memset(LoraFrame1.data_buffer, 0, DATA_SIZE);
+  counter++;
 }
 
+/*--------------------------------------------*/
+/*        TempSensorRead FUNCTION             */
+/*--------------------------------------------*/
 void TempSensorRead() {
-  char data_receive[] = {};
-  DEBUG_PRINT("Sensor Read");
-  DEBUG_PRINT("Before blocking requestForConversion");
-  unsigned long start = millis();
-
-  sensors.requestTemperatures();
-
-  unsigned long stop = millis();
-  DEBUG_PRINT("After blocking requestForConversion");
-  DEBUG_PRINT("Time used: ");
-  DEBUG_PRINT(stop - start);
-
   // get temperature
-  DEBUG_PRINT("Temperature: ");
+  sensors.requestTemperatures();
+  LoraFrame1.data_buffer[DATA_INDEX_TEMP_WATER] = sensors.getTempCByIndex(0);
+
+  DEBUG_PRINT("------------------\n");
+  DEBUG_PRINT("WaterTemperature:");
   DEBUG_PRINT(sensors.getTempCByIndex(0));
-  DEBUG_PRINT("\n");
-  data_buffer[data_Temp_Water] = sensors.getTempCByIndex(0);
+  DEBUG_PRINT("C.\n");
   // add data temp moyenne pondérée
 }
 
+/*--------------------------------------------*/
+/*        BaroSensorRead FUNCTION             */
+/*--------------------------------------------*/
 void BaroSensorRead() {
-    char display[40];
-    if(OK_HP20X_DEV == ret)
-    { 
-    Serial.println("------------------\n");
+  char display[40];
+  if (OK_HP20X_DEV == ret)
+  {
     long Temper = HP20x.ReadTemperature();
-    float t = Temper/100.0;    
-    Serial.println("C.\n");
-    Serial.println("Filter:");
-    Serial.print(t_filter.Filter(t));
-    Serial.println("C.\n");
-    data_buffer[data_Temp_Air] = t_filter.Filter(t);
- 
+    float t = Temper / 100.0;
+    LoraFrame1.data_buffer[DATA_INDEX_TEMP_AIR] = t_filter.Filter(t);
+
+    DEBUG_PRINT("------------------\n");
+    DEBUG_PRINT("AirTemperature:");
+    DEBUG_PRINT(t_filter.Filter(t));
+    DEBUG_PRINT("C.\n");
+
+
     long Pressure = HP20x.ReadPressure();
-    t = Pressure/100.0;
-    Serial.println("hPa.\n");
-    Serial.println("Filter:");
-    Serial.print(p_filter.Filter(t));
-    Serial.println("hPa\n");
-    data_buffer[data_Pres_Air] = p_filter.Filter(t);
-    
+    t = Pressure / 100.0;
+    LoraFrame1.data_buffer[DATA_INDEX_PRES_AIR] = p_filter.Filter(t);
+
+    DEBUG_PRINT("------------------\n");
+    DEBUG_PRINT("AirPressure:");
+    DEBUG_PRINT(p_filter.Filter(t));
+    DEBUG_PRINT("hPa\n");
+
+
     long Altitude = HP20x.ReadAltitude();
-    t = Altitude/100.0;
-    Serial.print(t);
-    Serial.println("m.\n");
-    Serial.println("Filter:");
-    Serial.print(a_filter.Filter(t));
-    Serial.println("m.\n");
-    Serial.println("------------------\n");
-    }
+    t = Altitude / 100.0;
+    DEBUG_PRINT("------------------\n");
+    DEBUG_PRINT("ReadAltitude:");
+    DEBUG_PRINT(a_filter.Filter(t));
+    DEBUG_PRINT("m\n");
+    DEBUG_PRINT("------------------\n");
+  }
+  else 
+  {
+    DEBUG_PRINT("HP20x not available:");
+  }
 }
+
+/*--------------------------------------------*/
+/*        AnalogSensorRead FUNCTION           */
+/*--------------------------------------------*/
 void AnalogSensorRead() {
   float analogOccupValue = 0;  // variable to store the value read
   analogOccupValue = (float)analogRead(analogOccupPin);
   Serial.println(analogOccupValue);
-  data_buffer[data_Occup] = analogOccupValue;
+  LoraFrame1.data_buffer[DATA_INDEX_OCCUP] = analogOccupValue;
 }
 
+/*--------------------------------------------*/
+/*                onTxDone ISR                */
+/*--------------------------------------------*/
 void onTxDone() {
   state = state_Idle;
 }
 
+/*--------------------------------------------*/
+/*                onRxDone ISR                */
+/*--------------------------------------------*/
 void onRxDone() {
   state = state_Idle;
+}
+
+/*--------------------------------------------*/
+/*                onWakeUp ISR                */
+/*--------------------------------------------*/
+void onWakeUp() {
+  state = state_Read;
+}
+
+/*--------------------------------------------*/
+/*       float to char FUNCTION               */
+/*--------------------------------------------*/
+char *dtostrf (float *val, signed char width, unsigned char prec, char *sout) {
+  char fmt[20];
+  sprintf(fmt, "%%%d.%df", width, prec);
+  sprintf(sout, fmt, val);
+  return sout;
 }
