@@ -209,9 +209,11 @@ void loop() {
         DEBUG_PRINT("------------------\n");
         DEBUG_PRINT("Time used for 1 cycle: ");
         DEBUG_PRINT(stop - start);
-        
-        LowPower.sleep(READ_DELAY);
-        //state = state_Read;
+
+        //LowPower.sleep(READ_DELAY);
+
+        delay(READ_DELAY);
+        state = state_Read;
         break;
 
       default:
@@ -238,15 +240,20 @@ void LoRaSend() {
   */
   /*solution 2*/
   /* header */
+  DEBUG_PRINT("------------------\n");
+  DEBUG_PRINT("trame:");
   for (int i = 0; i < HEADER_SIZE; i++)
   {
     LoRa.print(LoraFrame1.header_buffer[i]);
+    DEBUG_PRINT(LoraFrame1.header_buffer[i]);
   }
   /* payload*/
   for (int i = 0; i < DATA_SIZE; i++)
   {
     LoRa.print(LoraFrame1.data_buffer[i]);
+    DEBUG_PRINT(LoraFrame1.data_buffer[i]);
     LoRa.print(LoraFrame1.separator);
+    DEBUG_PRINT(LoraFrame1.separator);
   }
   LoRa.print(counter);
   LoRa.endPacket(true); // true = async / non-blocking mode
@@ -305,7 +312,7 @@ void BaroSensorRead() {
     DEBUG_PRINT("m\n");
     DEBUG_PRINT("------------------\n");
   }
-  else 
+  else
   {
     DEBUG_PRINT("HP20x not available:");
   }
