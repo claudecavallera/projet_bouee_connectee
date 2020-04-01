@@ -142,7 +142,6 @@ void setup() {
 
 }
 
-
 /*--------------------------------------------*/
 /*              MAIN FUNCTION                 */
 /*--------------------------------------------*/
@@ -233,13 +232,6 @@ void LoRaSend() {
 
   /*send in async / non-blocking mode*/
   LoRa.beginPacket();
-  /* solution 1
-    memset(payload_buffer, 0, PAYLOAD_BUFFER_SIZE);
-    strncpy(payload_buffer, header, HEADER_SIZE);
-    dtostrf(data_buffer, 4, 3, payload_buffer);
-  */
-  /*solution 2*/
-  /* header */
   DEBUG_PRINT("------------------\n");
   DEBUG_PRINT("trame:");
   for (int i = 0; i < HEADER_SIZE; i++)

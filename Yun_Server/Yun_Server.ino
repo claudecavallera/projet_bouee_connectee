@@ -1,17 +1,25 @@
 /*
-  LoRa Simple Yun Server :
-  Support Devices: LG01.
-  Example sketch showing how to create a simple messageing server,
-  with the RH_RF95 class. RH_RF95 class does not provide for addressing or
-  reliability, so you should only use RH_RF95 if you do not need the higher
-  level messaging abilities.
-  It is designed to work with the other example LoRa Simple Client
-  User need to use the modified RadioHead library from:
-  https://github.com/dragino/RadioHead
-  modified 16 11 2016
-  by Edwin Chen <support@dragino.com>
-  Dragino Technology Co., Limited
+   Copyright (c) 2020 by Antoine Cavallera <antoine.cavallera@gmail.com>
+   Copyright (c) 2020 by Claude Cavallera <claude.cavallera@gmail.com>
+   LoraWan project for MKR 1300
+
+   This file is free software; you can redistribute it and/or modify
+   it under the terms of either the GNU General Public License version 2
+   or the GNU Lesser General Public License version 2.1, both as
+   published by the Free Software Foundation.
 */
+
+/*--------------------------------------------*/
+/*                 INCLUDES                   */
+/*--------------------------------------------*/
+#include <Console.h>
+#include <SPI.h>
+#include <RH_RF95.h>
+#include <Process.h>
+
+/*--------------------------------------------*/
+/*                 DEFINES                    */
+/*--------------------------------------------*/
 //If you use Dragino IoT Mesh Firmware, uncomment below lines.
 //For product: LG01.
 #define BAUDRATE 115200
@@ -19,27 +27,25 @@
 //If you use Dragino Yun Mesh Firmware , uncomment below lines.
 //#define BAUDRATE 250000
 
-#include <Console.h>
-#include <SPI.h>
-#include <RH_RF95.h>
-#include <Process.h>
-// Singleton instance of the radio driver
-RH_RF95 rf95;
-
+/*--------------------------------------------*/
+/*                 GLOBAL DATA                */
+/*--------------------------------------------*/
 int led = A2;
 float frequency = 433.0;
 void uploadData(); // Upload Data to ThingSpeak.
-String dataStringTempWater = "";
-String dataStringTempAir = "";
-String dataStringPresAir = "";
-String dataStringOccup = "";
 String dataString = "";
 String PayloadString[4];
 String myWriteAPIString = "37P1XWK8VAF508NY";
-// Should be a message for us now
-uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
-uint8_t len = sizeof(buf);
 
+/*--------------------------------------------*/
+/*                 INSTANCES                  */
+/*--------------------------------------------*/
+// Singleton instance of the radio driver
+RH_RF95 rf95;
+
+/*--------------------------------------------*/
+/*              SETUP FUNCTION                */
+/*--------------------------------------------*/
 void setup()
 {
   pinMode(led, OUTPUT);
@@ -68,12 +74,26 @@ void setup()
   Console.println(frequency);
 }
 
+/*--------------------------------------------*/
+/*              MAIN FUNCTION                 */
+/*--------------------------------------------*/
 void loop()
 {
+  receiveData();
+  uploadData();
+  digitalWrite(led, LOW);
+}
+
+/*--------------------------------------------*/
+/*              receiveData FUNCTION          */
+/*--------------------------------------------*/
+void receiveData() {
   if (rf95.available())
   {
-
     int i = 0;
+    // Should be a message for us now
+    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(buf);
     if (rf95.recv(buf, &len))
     {
       digitalWrite(led, HIGH);
@@ -125,10 +145,12 @@ void loop()
       Console.print(PayloadString[i]);
       Console.print("\n");
     }
-    uploadData();
-    digitalWrite(led, LOW);
   }
 }
+
+/*--------------------------------------------*/
+/*              uploadData FUNCTION           */
+/*--------------------------------------------*/
 void uploadData() {//Upload Data to ThingSpeak
   // form the string for the API header parameter:
 
@@ -148,7 +170,7 @@ void uploadData() {//Upload Data to ThingSpeak
   Console.println("URL :");
   Console.println(upload_url);
   Console.println("\n");
-  
+
   Console.println("Call Linux Command to Send Data");
   Process p;    // Create a process and call it "p", this process will execute a Linux curl command
   p.begin("curl");
