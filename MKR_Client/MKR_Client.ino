@@ -25,7 +25,7 @@
 /*                 DEFINES                    */
 /*--------------------------------------------*/
 #define DEBUG
-#define LORA_FREQUENCY        433E6
+#define LORA_FREQUENCY        915E6
 #define LORA_TX_POWER         17
 #define LORA_SPREADING_FACTOR 7
 #define LORA_SIGNAL_BANDWIDTH 125000
@@ -33,8 +33,8 @@
 #define LORA_SYNC_WORD        0x12
 
 #define ONE_WIRE_BUS          2
-#define READ_DELAY            500
-#define SEND_DELAY            5000
+#define READ_DELAY            2000
+#define SEND_DELAY            20000
 #define RATE_SEND_READ_DELAY  SEND_DELAY/READ_DELAY
 
 #define HEADER_SIZE           4
@@ -43,7 +43,7 @@
 #define HEADER_INDEX_ID       2
 #define HEADER_INDEX_FLAG     3
 
-#define DATA_SIZE             4
+#define DATA_SIZE             6
 #define DATA_INDEX_TEMP_WATER 0
 #define DATA_INDEX_TEMP_AIR   1
 #define DATA_INDEX_PRES_AIR   2
@@ -67,6 +67,7 @@ state_R = state_R_Temp;
 const int counterMax = RATE_SEND_READ_DELAY;
 int analogOccupPin = A0; // potentiometer wiper (middle terminal) connected to analog pin 3
 unsigned char ret = 0;
+char tmp[10];
 
 char header_to = 0xff;
 char header_from = 0x01;
@@ -74,8 +75,12 @@ char header_id = 00;
 char header_flags = 00;
 
 struct loRaFrame {
-  char  header_buffer[HEADER_SIZE];
-  float data_buffer[DATA_SIZE];
+  char header_buffer[HEADER_SIZE];
+  char waterTemp[10];
+  char airTemp[10];
+  char airPressure[10];
+  char occup[10];
+  //float data_buffer[DATA_SIZE];
   char  separator;
 };
 
@@ -93,7 +98,7 @@ KalmanFilter t_filter;    //temperature filter
 KalmanFilter p_filter;    //pressure filter
 KalmanFilter a_filter;    //altitude filter
 /* loRa Frame */
-struct loRaFrame LoraFrame1 = {{0}, {0}, CHAR_SEPARATOR};
+struct loRaFrame LoraFrame1 = {"0", "0", "0", "0", "0", CHAR_SEPARATOR};
 
 /*--------------------------------------------*/
 /*              SETUP FUNCTION                */
@@ -208,10 +213,8 @@ void loop() {
         DEBUG_PRINT("------------------\n");
         DEBUG_PRINT("Time used for 1 cycle: ");
         DEBUG_PRINT(stop - start);
-
         //LowPower.sleep(READ_DELAY);
-
-        delay(READ_DELAY);
+        delay((stop - start)- READ_DELAY);
         state = state_Read;
         break;
 
@@ -234,23 +237,36 @@ void LoRaSend() {
   LoRa.beginPacket();
   DEBUG_PRINT("------------------\n");
   DEBUG_PRINT("trame:");
-  for (int i = 0; i < HEADER_SIZE; i++)
-  {
-    LoRa.print(LoraFrame1.header_buffer[i]);
-    DEBUG_PRINT(LoraFrame1.header_buffer[i]);
-  }
+  
+  /* header */
+  LoRa.print(LoraFrame1.header_buffer);
+  DEBUG_PRINT(LoraFrame1.header_buffer);
+  
   /* payload*/
-  for (int i = 0; i < DATA_SIZE; i++)
-  {
-    LoRa.print(LoraFrame1.data_buffer[i]);
-    DEBUG_PRINT(LoraFrame1.data_buffer[i]);
-    LoRa.print(LoraFrame1.separator);
-    DEBUG_PRINT(LoraFrame1.separator);
-  }
+  LoRa.print(LoraFrame1.waterTemp);
+  DEBUG_PRINT(LoraFrame1.waterTemp);
+  LoRa.print(LoraFrame1.separator);
+  DEBUG_PRINT(LoraFrame1.separator);
+
+  LoRa.print(LoraFrame1.airTemp);
+  DEBUG_PRINT(LoraFrame1.airTemp);
+  LoRa.print(LoraFrame1.separator);
+  DEBUG_PRINT(LoraFrame1.separator);
+
+  LoRa.print(LoraFrame1.airPressure);
+  DEBUG_PRINT(LoraFrame1.airPressure);
+  LoRa.print(LoraFrame1.separator);
+  DEBUG_PRINT(LoraFrame1.separator);
+
+  LoRa.print(LoraFrame1.occup);
+  DEBUG_PRINT(LoraFrame1.occup);
+  LoRa.print(LoraFrame1.separator);
+  DEBUG_PRINT(LoraFrame1.separator);
+
   LoRa.print(counter);
   LoRa.endPacket(true); // true = async / non-blocking mode
 
-  memset(LoraFrame1.data_buffer, 0, DATA_SIZE);
+  //memset(LoraFrame1.data_buffer, 0, DATA_SIZE);
   counter++;
 }
 
@@ -260,7 +276,7 @@ void LoRaSend() {
 void TempSensorRead() {
   // get temperature
   sensors.requestTemperatures();
-  LoraFrame1.data_buffer[DATA_INDEX_TEMP_WATER] = sensors.getTempCByIndex(0);
+  dtostrf(sensors.getTempCByIndex(0), 6, 2, LoraFrame1.waterTemp);
 
   DEBUG_PRINT("------------------\n");
   DEBUG_PRINT("WaterTemperature:");
@@ -278,7 +294,7 @@ void BaroSensorRead() {
   {
     long Temper = HP20x.ReadTemperature();
     float t = Temper / 100.0;
-    LoraFrame1.data_buffer[DATA_INDEX_TEMP_AIR] = t_filter.Filter(t);
+    dtostrf(t_filter.Filter(t), 6, 2, LoraFrame1.airTemp);
 
     DEBUG_PRINT("------------------\n");
     DEBUG_PRINT("AirTemperature:");
@@ -288,7 +304,7 @@ void BaroSensorRead() {
 
     long Pressure = HP20x.ReadPressure();
     t = Pressure / 100.0;
-    LoraFrame1.data_buffer[DATA_INDEX_PRES_AIR] = p_filter.Filter(t);
+    dtostrf(p_filter.Filter(t), 6, 2, LoraFrame1.airPressure);
 
     DEBUG_PRINT("------------------\n");
     DEBUG_PRINT("AirPressure:");
@@ -317,7 +333,7 @@ void AnalogSensorRead() {
   float analogOccupValue = 0;  // variable to store the value read
   analogOccupValue = (float)analogRead(analogOccupPin);
   Serial.println(analogOccupValue);
-  LoraFrame1.data_buffer[DATA_INDEX_OCCUP] = analogOccupValue;
+  dtostrf(analogOccupValue, 6, 2, LoraFrame1.occup);
 }
 
 /*--------------------------------------------*/
@@ -344,7 +360,7 @@ void onWakeUp() {
 /*--------------------------------------------*/
 /*       float to char FUNCTION               */
 /*--------------------------------------------*/
-char *dtostrf (float *val, signed char width, unsigned char prec, char *sout) {
+char *dtostrf (float val, signed char width, unsigned char prec, char *sout) {
   char fmt[20];
   sprintf(fmt, "%%%d.%df", width, prec);
   sprintf(sout, fmt, val);

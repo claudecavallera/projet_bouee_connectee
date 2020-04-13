@@ -16,14 +16,16 @@
 #include <SPI.h>
 #include <RH_RF95.h>
 #include <Process.h>
+#include <RHReliableDatagram.h>
 
 /*--------------------------------------------*/
 /*                 DEFINES                    */
 /*--------------------------------------------*/
 //If you use Dragino IoT Mesh Firmware, uncomment below lines.
 //For product: LG01.
-#define BAUDRATE 115200
-
+#define BAUDRATE              115200
+#define SERVER_ADDRESS        2
+#define CHAR_SEPARATOR        0x23
 //If you use Dragino Yun Mesh Firmware , uncomment below lines.
 //#define BAUDRATE 250000
 
@@ -31,17 +33,36 @@
 /*                 GLOBAL DATA                */
 /*--------------------------------------------*/
 int led = A2;
-float frequency = 433.0;
+float frequency = 915.0;
 void uploadData(); // Upload Data to ThingSpeak.
 String dataString = "";
-String PayloadString[4];
 String myWriteAPIString = "37P1XWK8VAF508NY";
+uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+
+enum {state_Receive, state_Decode, state_Upload, state_Idle}
+state = state_Receive;
+
+enum {state_D_waterTemp, state_D_airTemp, state_D_airPressure, state_D_occup, state_D_done}
+state_D = state_D_waterTemp;
+
+struct loRaFrame {
+  char waterTemp[10];
+  char airTemp[10];
+  char airPressure[10];
+  char occup[10];
+  //float data_buffer[DATA_SIZE];
+  char  separator;
+};
 
 /*--------------------------------------------*/
 /*                 INSTANCES                  */
 /*--------------------------------------------*/
 // Singleton instance of the radio driver
 RH_RF95 rf95;
+// Class to manage message delivery and receipt, using the driver declared above
+RHReliableDatagram manager(rf95, SERVER_ADDRESS);
+// instance of the LoraFrame
+struct loRaFrame LoraFrame1 = {"0", "0", "0", "0", CHAR_SEPARATOR};
 
 /*--------------------------------------------*/
 /*              SETUP FUNCTION                */
@@ -79,9 +100,40 @@ void setup()
 /*--------------------------------------------*/
 void loop()
 {
-  receiveData();
-  uploadData();
-  digitalWrite(led, LOW);
+  while (1)
+  {
+    switch (state)
+    {
+      case state_Receive:
+        Console.println("state_Receive");
+        receiveData();
+        state = state_Decode;
+        break;
+
+      case state_Decode:
+        Console.println("state_Decode");
+        decodeData();
+        state = state_Upload;
+        break;
+
+      case state_Upload:
+        Console.println("state_Upload");
+        uploadData();
+        digitalWrite(led, LOW);
+        state = state_Idle;
+        break;
+
+      case state_Idle:
+        Console.println("state_Idle");
+        delay(50);
+        state = state_Receive;
+        break;
+
+      default:
+        state = state_Idle;
+        break;
+    }
+  }
 }
 
 /*--------------------------------------------*/
@@ -92,7 +144,7 @@ void receiveData() {
   {
     int i = 0;
     // Should be a message for us now
-    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+
     uint8_t len = sizeof(buf);
     if (rf95.recv(buf, &len))
     {
@@ -116,38 +168,80 @@ void receiveData() {
       Console.println("recv failed");
     }
 
-    int j = 0;
-    for (int i = 0; i < 4; i++)
-    {
-      PayloadString[i] = "";
-    }
-    PayloadString[0].concat((char)buf[0]);
-    for (int i = 1; i < 30; i++)
-    {
-
-      if (buf[i] != 0x23)
-      {
-        PayloadString[j].concat((char)buf[i]);
-      }
-      else
-      {
-        j++;
-        i++;
-        PayloadString[j].concat((char)buf[i]);
-      }
-    }
-
-    for (int i = 0; i < 4; i++)
-    {
-      Console.print("PayloadString");
-      Console.print(i);
-      Console.print(":\n");
-      Console.print(PayloadString[i]);
-      Console.print("\n");
-    }
   }
 }
 
+/*--------------------------------------------*/
+/*              decodeData FUNCTION           */
+/*--------------------------------------------*/
+void decodeData() {
+  int j = 0;
+  for (int i = 0; i < 30; i++ )
+  {
+    switch (state_D)
+    {
+      case state_D_waterTemp:
+        j = 0;
+        if (buf[i] != 0x23) {
+          LoraFrame1.waterTemp[j] = buf[i];
+        }
+        else {
+          i++;
+          state_D = state_D_airTemp;
+        }
+        break;
+
+      case state_D_airTemp:
+        j = 0;
+        if (buf[i] != 0x23) {
+          LoraFrame1.airTemp[j] = buf[i];
+        }
+        else {
+          i++;
+          state_D = state_D_airPressure;
+        }
+        break;
+
+      case state_D_airPressure:
+        j = 0;
+        if (buf[i] != 0x23) {
+          LoraFrame1.airPressure[j] = buf[i];
+        }
+        else {
+          i++;
+          state_D = state_D_occup;
+        }
+        break;
+
+      case state_D_occup:
+        j = 0;
+        if (buf[i] != 0x23) {
+          LoraFrame1.airPressure[j] = buf[i];
+        }
+        else {
+          i++;
+          state_D = state_D_done;
+        }
+        break;
+
+      case state_D_done:
+        i = 200;
+        break;
+
+      default:
+        state_D = state_D_done;
+        break;
+    }
+  }
+  Console.print("waterTemp");
+  Console.println(LoraFrame1.waterTemp);
+  Console.print("airTemp");
+  Console.println(LoraFrame1.airTemp);
+  Console.print("airPressure");
+  Console.println(LoraFrame1.airPressure);
+  Console.print("occup");
+  Console.println(LoraFrame1.occup);
+}
 /*--------------------------------------------*/
 /*              uploadData FUNCTION           */
 /*--------------------------------------------*/
@@ -159,13 +253,13 @@ void uploadData() {//Upload Data to ThingSpeak
   String upload_url = "https://api.thingspeak.com/update?api_key=";
   upload_url += myWriteAPIString;
   upload_url += "&field1=";
-  upload_url += PayloadString[0];
+  upload_url += LoraFrame1.waterTemp;
   upload_url += "&field2=";
-  upload_url += PayloadString[1];
+  upload_url += LoraFrame1.airTemp;
   upload_url += "&field3=";
-  upload_url += PayloadString[2];
+  upload_url += LoraFrame1.airPressure;
   upload_url += "&field4=";
-  upload_url += PayloadString[3];
+  upload_url += LoraFrame1.occup;
 
   Console.println("URL :");
   Console.println(upload_url);
