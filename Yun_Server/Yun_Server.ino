@@ -16,7 +16,7 @@
 #include <SPI.h>
 #include <RH_RF95.h>
 #include <Process.h>
-#include <RHReliableDatagram.h>
+//#include <RHReliableDatagram.h>
 
 /*--------------------------------------------*/
 /*                 DEFINES                    */
@@ -26,6 +26,8 @@
 #define BAUDRATE              115200
 #define SERVER_ADDRESS        2
 #define CHAR_SEPARATOR        0x23
+#define MAX_MESSAGE_LEN       30
+#define MAX_URL_LENGHT        115
 //If you use Dragino Yun Mesh Firmware , uncomment below lines.
 //#define BAUDRATE 250000
 
@@ -35,9 +37,8 @@
 int led = A2;
 float frequency = 915.0;
 void uploadData(); // Upload Data to ThingSpeak.
-String dataString = "";
-String myWriteAPIString = "37P1XWK8VAF508NY";
-uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+char myWriteAPIString[] = "37P1XWK8VAF508NY";
+uint8_t buf[MAX_MESSAGE_LEN];
 
 enum {state_Receive, state_Decode, state_Upload, state_Idle}
 state = state_Receive;
@@ -60,7 +61,7 @@ struct loRaFrame {
 // Singleton instance of the radio driver
 RH_RF95 rf95;
 // Class to manage message delivery and receipt, using the driver declared above
-RHReliableDatagram manager(rf95, SERVER_ADDRESS);
+//RHReliableDatagram manager(rf95, SERVER_ADDRESS);
 // instance of the LoraFrame
 struct loRaFrame LoraFrame1 = {"0", "0", "0", "0", CHAR_SEPARATOR};
 
@@ -107,7 +108,6 @@ void loop()
       case state_Receive:
         Console.println("state_Receive");
         receiveData();
-        state = state_Decode;
         break;
 
       case state_Decode:
@@ -162,12 +162,17 @@ void receiveData() {
       Console.print((char*)buf);
       Console.print("RSSI: ");
       Console.println(rf95.lastRssi(), DEC);
+      state = state_Decode;
     }
     else
     {
       Console.println("recv failed");
+      state = state_Idle;
     }
 
+  }
+  else {
+    state = state_Idle;
   }
 }
 
@@ -176,69 +181,44 @@ void receiveData() {
 /*--------------------------------------------*/
 void decodeData() {
   int j = 0;
-  for (int i = 0; i < 30; i++ )
-  {
-    switch (state_D)
-    {
-      case state_D_waterTemp:
-        j = 0;
-        if (buf[i] != 0x23) {
-          LoraFrame1.waterTemp[j] = buf[i];
-        }
-        else {
-          i++;
-          state_D = state_D_airTemp;
-        }
-        break;
+  int i = 0;
 
-      case state_D_airTemp:
-        j = 0;
-        if (buf[i] != 0x23) {
-          LoraFrame1.airTemp[j] = buf[i];
-        }
-        else {
-          i++;
-          state_D = state_D_airPressure;
-        }
-        break;
-
-      case state_D_airPressure:
-        j = 0;
-        if (buf[i] != 0x23) {
-          LoraFrame1.airPressure[j] = buf[i];
-        }
-        else {
-          i++;
-          state_D = state_D_occup;
-        }
-        break;
-
-      case state_D_occup:
-        j = 0;
-        if (buf[i] != 0x23) {
-          LoraFrame1.airPressure[j] = buf[i];
-        }
-        else {
-          i++;
-          state_D = state_D_done;
-        }
-        break;
-
-      case state_D_done:
-        i = 200;
-        break;
-
-      default:
-        state_D = state_D_done;
-        break;
-    }
+  while ((buf[i] != 0x23) || i > 30) {
+    LoraFrame1.waterTemp[j] = buf[i];
+    j++;
+    i++;
   }
-  Console.print("waterTemp");
+  i++;
+  Console.print("waterTemp : ");
   Console.println(LoraFrame1.waterTemp);
+
+  j = 0;
+  while ((buf[i] != 0x23) || i > 30) {
+    LoraFrame1.airTemp[j] = buf[i];
+    j++;
+    i++;
+  }
+  i++;
   Console.print("airTemp");
   Console.println(LoraFrame1.airTemp);
+
+  j = 0;
+  while ((buf[i] != 0x23) || i > 30) {
+    LoraFrame1.airPressure[j] = buf[i];
+    j++;
+    i++;
+  }
+  i++;
   Console.print("airPressure");
   Console.println(LoraFrame1.airPressure);
+
+  j = 0;
+  while ((buf[i] != 0x23) || i > 30) {
+    LoraFrame1.occup[j] = buf[i];
+    j++;
+    i++;
+  }
+  i++;
   Console.print("occup");
   Console.println(LoraFrame1.occup);
 }
@@ -248,22 +228,24 @@ void decodeData() {
 void uploadData() {//Upload Data to ThingSpeak
   // form the string for the API header parameter:
 
+  //  form the string for the URL parameter, be careful about the required "
+  char upload_url[MAX_URL_LENGHT] = "https://api.thingspeak.com/update?api_key=";
+  strncat(upload_url, myWriteAPIString, MAX_URL_LENGHT - 1);
+  strncat(upload_url, "&field1=",  MAX_URL_LENGHT - 1);
+  strncat(upload_url, LoraFrame1.waterTemp,  MAX_URL_LENGHT - 1);
 
-  // form the string for the URL parameter, be careful about the required "
-  String upload_url = "https://api.thingspeak.com/update?api_key=";
-  upload_url += myWriteAPIString;
-  upload_url += "&field1=";
-  upload_url += LoraFrame1.waterTemp;
-  upload_url += "&field2=";
-  upload_url += LoraFrame1.airTemp;
-  upload_url += "&field3=";
-  upload_url += LoraFrame1.airPressure;
-  upload_url += "&field4=";
-  upload_url += LoraFrame1.occup;
+  strncat(upload_url, "&field2=",  MAX_URL_LENGHT - 1);
+  strncat(upload_url, LoraFrame1.airTemp,  MAX_URL_LENGHT - 1);
+
+  strncat(upload_url, "&field3=",  MAX_URL_LENGHT - 1);
+  strncat(upload_url, LoraFrame1.airPressure,  MAX_URL_LENGHT - 1);
+
+  strncat(upload_url, "&field4=",  MAX_URL_LENGHT - 1);
+  strncat(upload_url, LoraFrame1.occup,  MAX_URL_LENGHT - 1);
+  strncat(upload_url, '\0',  MAX_URL_LENGHT - 1);
 
   Console.println("URL :");
   Console.println(upload_url);
-  Console.println("\n");
 
   Console.println("Call Linux Command to Send Data");
   Process p;    // Create a process and call it "p", this process will execute a Linux curl command

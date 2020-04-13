@@ -37,11 +37,12 @@
 #define SEND_DELAY            20000
 #define RATE_SEND_READ_DELAY  SEND_DELAY/READ_DELAY
 
-#define HEADER_SIZE           4
+#define HEADER_SIZE           5
 #define HEADER_INDEX_TO       0
 #define HEADER_INDEX_FROM     1
 #define HEADER_INDEX_ID       2
 #define HEADER_INDEX_FLAG     3
+#define HEADER_INDEX_END      4
 
 #define DATA_SIZE             6
 #define DATA_INDEX_TEMP_WATER 0
@@ -71,8 +72,9 @@ char tmp[10];
 
 char header_to = 0xff;
 char header_from = 0x01;
-char header_id = 00;
-char header_flags = 00;
+char header_id = 0x01;
+char header_flags = 0x01;
+char header_end = 0x00;
 
 struct loRaFrame {
   char header_buffer[HEADER_SIZE];
@@ -106,8 +108,8 @@ struct loRaFrame LoraFrame1 = {"0", "0", "0", "0", "0", CHAR_SEPARATOR};
 void setup() {
   /********** General Setup **********/
   Serial.begin(9600);
-  //while (!Serial);
-  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, onWakeUp, CHANGE);
+  while (!Serial);
+  //LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, onWakeUp, CHANGE);
 
 
   /********** Setup LoraWan **********/
@@ -127,6 +129,8 @@ void setup() {
   LoraFrame1.header_buffer[HEADER_INDEX_FROM] = header_from;
   LoraFrame1.header_buffer[HEADER_INDEX_ID]   = header_id;
   LoraFrame1.header_buffer[HEADER_INDEX_FLAG] = header_flags;
+  LoraFrame1.header_buffer[HEADER_INDEX_END]  = header_end;
+  
 
 
   /********** Setup Sensor **********/
@@ -198,13 +202,15 @@ void loop() {
 
       case state_Send:
         DEBUG_PRINT("State Send");
+        DEBUG_PRINT("**********");
+        DEBUG_PRINT("**********");
+        DEBUG_PRINT("**********");
+        DEBUG_PRINT("**********");
+        DEBUG_PRINT("**********");
+        DEBUG_PRINT("**********");
         // Send Read data with Lora
         LoRaSend();
-        state = state_Compute;
-        break;
-
-      case state_Compute:
-        DEBUG_PRINT("State Compute");
+        state = state_Idle;
         break;
 
       case state_Idle:
@@ -214,7 +220,7 @@ void loop() {
         DEBUG_PRINT("Time used for 1 cycle: ");
         DEBUG_PRINT(stop - start);
         //LowPower.sleep(READ_DELAY);
-        delay((stop - start)- READ_DELAY);
+        delay(READ_DELAY - (stop - start));
         state = state_Read;
         break;
 
@@ -237,11 +243,11 @@ void LoRaSend() {
   LoRa.beginPacket();
   DEBUG_PRINT("------------------\n");
   DEBUG_PRINT("trame:");
-  
-  /* header */
+
+//  /* header */
   LoRa.print(LoraFrame1.header_buffer);
   DEBUG_PRINT(LoraFrame1.header_buffer);
-  
+
   /* payload*/
   LoRa.print(LoraFrame1.waterTemp);
   DEBUG_PRINT(LoraFrame1.waterTemp);
@@ -264,8 +270,7 @@ void LoRaSend() {
   DEBUG_PRINT(LoraFrame1.separator);
 
   LoRa.print(counter);
-  LoRa.endPacket(true); // true = async / non-blocking mode
-
+  LoRa.endPacket(); // true = async / non-blocking mode
   //memset(LoraFrame1.data_buffer, 0, DATA_SIZE);
   counter++;
 }
@@ -276,7 +281,7 @@ void LoRaSend() {
 void TempSensorRead() {
   // get temperature
   sensors.requestTemperatures();
-  dtostrf(sensors.getTempCByIndex(0), 6, 2, LoraFrame1.waterTemp);
+  dtostrf(sensors.getTempCByIndex(0), 5, 2, LoraFrame1.waterTemp);
 
   DEBUG_PRINT("------------------\n");
   DEBUG_PRINT("WaterTemperature:");
@@ -294,7 +299,7 @@ void BaroSensorRead() {
   {
     long Temper = HP20x.ReadTemperature();
     float t = Temper / 100.0;
-    dtostrf(t_filter.Filter(t), 6, 2, LoraFrame1.airTemp);
+    dtostrf(t_filter.Filter(t), 5, 2, LoraFrame1.airTemp);
 
     DEBUG_PRINT("------------------\n");
     DEBUG_PRINT("AirTemperature:");
